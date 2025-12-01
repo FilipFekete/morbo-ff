@@ -10,13 +10,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 import torch
 from botorch.exceptions.errors import BotorchTensorDimensionError
-from botorch.fit import fit_gpytorch_model
+from botorch.fit import fit_gpytorch_mll
 from botorch.models.gp_regression import SingleTaskGP
 from botorch.models.model import Model
 from botorch.models.model_list_gp_regression import ModelListGP
 from botorch.models.transforms.input import InputTransform
 from botorch.models.transforms.outcome import OutcomeTransform
-from botorch.optim.fit import fit_gpytorch_torch
+# from botorch.optim.fit import fit_gpytorch_torch // not used 
 from botorch.utils.sampling import draw_sobol_samples
 from gpytorch import settings as gpytorch_settings
 from gpytorch.constraints import GreaterThan, Interval
@@ -245,7 +245,7 @@ def get_fitted_model(
         if state_dict is not None:
             model.load_state_dict(state_dict)
         # 50 iterations appears to be a good compromise between fit and overhead.
-        fit_gpytorch_model(mll, options=fit_gpytorch_options)
+        fit_gpytorch_mll(mll, options=fit_gpytorch_options)
 
     if X.is_cuda:
         print(f"after fitting: {torch.cuda.memory_allocated(X.device) / (1000 ** 3)}")

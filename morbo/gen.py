@@ -11,13 +11,20 @@ from typing import Callable, NamedTuple, Tuple
 
 import gpytorch
 import torch
-from botorch.acquisition.multi_objective.monte_carlo import (
-    qExpectedHypervolumeImprovement,
-)
+# from botorch.acquisition.multi_objective.monte_carlo import (
+#     qExpectedHypervolumeImprovement,
+# ) // replaced by qLogExpectedHypervolumeImprovement
+from botorch.acquisition.multi_objective.logei import qLogExpectedHypervolumeImprovement
+
 from botorch.models.deterministic import GenericDeterministicModel
 from botorch.models.model_list_gp_regression import ModelListGP
-from botorch.sampling import IIDNormalSampler, SobolQMCNormalSampler
-from botorch.utils.gp_sampling import get_gp_samples
+# from botorch.sampling import SobolQMCNormalSampler // not used 
+# from botorch.sampling import IIDNormalSampler  // not used
+
+# from botorch.utils.gp_sampling import get_gp_samples 
+# no longer exists in BoTorch replacement -> draw_matheron_paths
+from botorch.sampling.pathwise import draw_matheron_paths
+
 from botorch.utils.multi_objective.pareto import is_non_dominated
 from botorch.utils.multi_objective.box_decompositions.box_decomposition import (
     BoxDecomposition,
@@ -32,11 +39,11 @@ from morbo.state import TRBOState
 from morbo.utils import (
     decay_function,
     get_indices_in_hypercube,
-    sample_tr_discrete_points,
+    # sample_tr_discrete_points, // not used
     sample_tr_discrete_points_subset_d,
 )
 from torch import Tensor
-from torch.quasirandom import SobolEngine
+# from torch.quasirandom import SobolEngine // not used
 
 
 class CandidateSelectionOutput(NamedTuple):
@@ -183,15 +190,29 @@ def TS_select_batch_MORBO(trbo_state: TRBOState) -> CandidateSelectionOutput:
             objective = trbo_state.trust_regions[tr_idx].objective
             model = trbo_state.models[tr_idx]
 
-            # TODO: Make num_rff_features a hyperparameter of TuRBO
+
+            '''
+            The following block was added to replace the removed get_gp_samples function from BoTorch
+            '''
             if use_rffs:
                 models = [model] if not isinstance(model, ModelListGP) else model.models
-                sample_model = get_gp_samples(
+                sample_model = draw_matheron_paths(
                     model=model,
-                    num_outputs=len(models),
-                    n_samples=1,
+                    num_paths=len(models),
                     num_rff_features=1024,
+                    sample_shape=torch.Size([1]),  # same “n_samples=1”
                 )
+
+
+            # # TODO: Make num_rff_features a hyperparameter of TuRBO
+            # if use_rffs:
+            #     models = [model] if not isinstance(model, ModelListGP) else model.models
+            #     sample_model = get_gp_samples(
+            #         model=model,
+            #         num_outputs=len(models),
+            #         n_samples=1,
+            #         num_rff_features=1024,
+            #     )
 
             # Get the pending points inside the TR and stack them to the candidates
             if len(inds_next_in_tr) > 0:
@@ -210,9 +231,23 @@ def TS_select_batch_MORBO(trbo_state: TRBOState) -> CandidateSelectionOutput:
                 covar_root_decomposition=False,
                 solves=False,
             ), gpytorch.settings.max_eager_kernel_size(float("inf")):
+                # if use_rffs:
+                #     Y_sample = (
+                #         sample_model(X_cand_unnormalized).to(**tkwargs).squeeze(0)
+                #     )
+                # else:
+                #     Y_sample = (
+                #         model.posterior(X_cand_unnormalized)
+                #         .sample(torch.Size([1]))
+                #         .squeeze(0)
+                #     )
+                ''' Replacement block for removed get_gp_samples function '''
                 if use_rffs:
                     Y_sample = (
-                        sample_model(X_cand_unnormalized).to(**tkwargs).squeeze(0)
+                        sample_model(X_cand_unnormalized)
+                        .to(**tkwargs)
+                        .squeeze(0)   # sample_shape
+                        .squeeze(0)   # num_paths
                     )
                 else:
                     Y_sample = (
@@ -220,6 +255,7 @@ def TS_select_batch_MORBO(trbo_state: TRBOState) -> CandidateSelectionOutput:
                         .sample(torch.Size([1]))
                         .squeeze(0)
                     )
+
             end = time.time()
             time_sampling += end - start
 
@@ -302,13 +338,24 @@ def TS_select_batch_MORBO(trbo_state: TRBOState) -> CandidateSelectionOutput:
                             f=get_batched_objective_samples,
                             num_outputs=f_obj_better_than_ref.shape[-1],
                         )
-                        acqf = qExpectedHypervolumeImprovement(
+                        '''
+                        qExpectedHypervolumeImprovement was replaced by --> qLogExpectedHypervolumeImprovement
+                        '''
+                        # acqf = qExpectedHypervolumeImprovement(
+                        #     model=sampled_model,
+                        #     ref_point=ref_point,
+                        #     partitioning=partitioning,
+                        #     sampler=SobolQMCNormalSampler(
+                        #         # num_samples=1, // no longer initialized this way
+                        #         sample_shape=torch.Size([1]) # replacement for num_samples 
+                        #     ),  # dummy sampler
+                        # )
+
+                        acqf = qLogExpectedHypervolumeImprovement(
                             model=sampled_model,
                             ref_point=ref_point,
                             partitioning=partitioning,
-                            sampler=SobolQMCNormalSampler(
-                                num_samples=1
-                            ),  # dummy sampler
+                            # Don't pass a sampler - the deterministic model doesn't need one
                         )
                         with torch.no_grad():
                             # add a q-batch dimension to compute HVI for each
