@@ -16,6 +16,11 @@ import torch
 # ) // replaced by qLogExpectedHypervolumeImprovement
 from botorch.acquisition.multi_objective.logei import qLogExpectedHypervolumeImprovement
 
+from botorch.acquisition.multi_objective.monte_carlo import (
+    qExpectedHypervolumeImprovement,
+)
+
+
 from botorch.models.deterministic import GenericDeterministicModel
 from botorch.models.model_list_gp_regression import ModelListGP
 # from botorch.sampling import SobolQMCNormalSampler // not used 
@@ -360,14 +365,27 @@ def TS_select_batch_MORBO(trbo_state: TRBOState) -> CandidateSelectionOutput:
                         with torch.no_grad():
                             # add a q-batch dimension to compute HVI for each
                             # discrete point alone
-                            hvi = acqf(  # dummy input
+                        #     hvi = acqf(  # dummy input
+                        #         X_cand_unnormalized[better_than_ref].unsqueeze(1)
+                        #     ).to(device=tkwargs["device"])
+                        # pareto_mask = hvi > 0
+
+                            ''' 
+                            If qLogEHVI is used instead of qEHVI the mask needs to be modified to accept  any finite log-EHVI, 
+                            because it is negative whenever 0 < EHVI < 1. All the valid-but-negative log values 
+                            get treated as “no improvement” and the optimizer falls back to the tie-breaker.
+                            '''
+
+                            hvi_log = acqf(
                                 X_cand_unnormalized[better_than_ref].unsqueeze(1)
                             ).to(device=tkwargs["device"])
-                        pareto_mask = hvi > 0
+                        
+                        pareto_mask = torch.isfinite(hvi_log)
+                        
                     if any(better_than_ref) and any(pareto_mask):
                         # Hypervolume improvement
                         selection_rule = 3
-                        value_score[better_than_ref] = hvi
+                        value_score[better_than_ref] = hvi_log
                     else:
                         selection_rule = 2
                         print(f"{i}) Breaking ties using a random scalarization")
